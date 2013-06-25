@@ -22,6 +22,9 @@ limitations under the License.
 // Include all settings and classes
 require_once('shared.inc.php');
 
+// Fetch our last statsrun Share ID for incremental stats
+$iLastShareId = $setting->getValue('statistics_max_share_id') ? $setting->getValue('statistics_max_share_id') : 0;
+
 // Fetch all cachable values but disable fetching from cache
 $statistics->setGetCache(false);
 
@@ -42,9 +45,9 @@ verbose("\n  getCurrentHashrate ...");
 if (!$statistics->getCurrentHashrate())
   verbose(" update failed");
 // Admin specific statistics, we cache the global query due to slowness
-verbose("\n  getAllUserStats ...");
-if (!$statistics->getAllUserStats('%'))
-  verbose(" update failed");
+// verbose("\n  getAllUserStats ...");
+// if (!$statistics->getAllUserStats('%'))
+//  verbose(" update failed");
 verbose("\n");
 
 // Per user share statistics based on all shares submitted
@@ -53,9 +56,22 @@ $stmt = $mysqli->prepare("SELECT DISTINCT SUBSTRING_INDEX( `username` , '.', 1 )
 if ($stmt && $stmt->execute() && $result = $stmt->get_result()) {
   while ($row = $result->fetch_assoc()) {
     verbose("    " . $row['username'] . " ...");
-    if (!$statistics->getUserShares($user->getUserId($row['username'])))
-      verbose(" update failed");
+    // Fetch shares from cached value
+    verbose(" fetch cached ...");
+    $statistics->setGetCache(true);
+    $aUserShares = $statistics->getUserShares($user->getUserId($row['username']));
+    // Fetch newly added shares since last time we cached them
+    verbose(" fetch new ...");
+    $statistics->setGetCache(false);
+    if (!$aNewUserShares = $statistics->getUserShares($user->getUserId($row['username']), $iLastShareId, $aUserShares)) {
+      verbose(" update failed:" . $statistics->getError());
+    } else {
+      verbose(" done");
+    }
     verbose("\n");
   }
 }
+
+// Store this runs max share ID to pick up next time
+$setting->setValue('statistics_max_share_id', $iCurrentShareId);
 ?>

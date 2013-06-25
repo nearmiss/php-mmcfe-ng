@@ -152,9 +152,11 @@ class Statistics {
   /**
    * Get amount of shares for a specific user
    * @param account_id int User ID
+   * @param iStart int Starting share ID
+   * @param aOldShares array Old shares for this account
    * @return data array invalid and valid share counts
    **/
-  public function getUserShares($account_id) {
+  public function getUserShares($account_id, $iStart = 0, $aOldShares = NULL) {
     $this->debug->append("STA " . __METHOD__, 4);
     if ($this->getGetCache() && $data = $this->memcache->get(__FUNCTION__ . $account_id)) return $data;
     $stmt = $this->mysqli->prepare("
@@ -167,6 +169,7 @@ class Statistics {
           AND UNIX_TIMESTAMP(s.time) >IFNULL((SELECT MAX(b.time) FROM " . $this->block->getTableName() . " AS b),0)
           AND our_result = 'Y'
           AND u.id = ?
+          AND s.id > ?
       ) AS valid,
       (
         SELECT COUNT(s.id)
@@ -176,11 +179,22 @@ class Statistics {
           AND UNIX_TIMESTAMP(s.time) >IFNULL((SELECT MAX(b.time) FROM " . $this->block->getTableName() . " AS b),0)
           AND our_result = 'N'
           AND u.id = ?
+          AND s.id > ?
       ) AS invalid"); 
-    if ($stmt && $stmt->bind_param("ii", $account_id, $account_id) && $stmt->execute() && $result = $stmt->get_result())
-      return $this->memcache->setCache(__FUNCTION__ . $account_id, $result->fetch_assoc());
+    if ($stmt && $stmt->bind_param("iiii", $account_id, $iStart, $account_id, $iStart) && $stmt->execute() && $result = $stmt->get_result()) {
+      // Fetch shares from query
+      $aUserShares = $result->fetch_assoc();
+      // If we have old shares passed to us, add the current shares found to the existing ones
+      if (!empty($aOldShares)) {
+        $aUserShares['valid'] += $aOldShares['valid'];
+        $aUserShares['invalid'] += $aOldShares['invalid'];
+      }
+      // Return shares and cache value
+      return $this->memcache->setCache(__FUNCTION__ . $account_id, $aUserShares);
+    }
     // Catchall
     $this->debug->append("Unable to fetch user round shares: " . $this->mysqli->error);
+    $this->setErrorMessage("Failed: " . $this->mysqli->error);
     return false;
   }
 
